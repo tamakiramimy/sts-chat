@@ -1,0 +1,4 @@
+httpx==0.27.2
+livekit==0.17.6
+livekit-agents==0.11.3
+python-dotenv==1.0.1

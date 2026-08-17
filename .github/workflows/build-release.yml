@@ -1,0 +1,299 @@
+name: Build and Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/client
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: x64
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build apk --debug --target-platform android-arm,android-arm64,android-x64
+      - name: Package universal APK
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp build/app/outputs/flutter-apk/app-debug.apk "$GITHUB_WORKSPACE/dist/sts-chat-android-debug.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: dist/sts-chat-android-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS arm64 unsigned IPA
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: src/client
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: arm64
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build ios --release --no-codesign
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist/Payload"
+          ditto build/ios/iphoneos/Runner.app "$GITHUB_WORKSPACE/dist/Payload/Runner.app"
+          (
+            cd "$GITHUB_WORKSPACE/dist"
+            ditto -c -k --sequesterRsrc --keepParent Payload sts-chat-ios-arm64-unsigned.ipa
+          )
+          rm -rf "$GITHUB_WORKSPACE/dist/Payload"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-ios
+          path: dist/sts-chat-ios-arm64-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Windows ${{ matrix.arch }} ZIP
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            sdk_arch: x64
+            cache: 'true'
+          - arch: arm64
+            runner: windows-11-arm
+            sdk_arch: x64
+            cache: 'false'
+    defaults:
+      run:
+        working-directory: src/client
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: ${{ matrix.sdk_arch }}
+          cache: ${{ matrix.cache }}
+      - name: Switch Flutter SDK to ARM64
+        if: matrix.arch == 'arm64'
+        run: |
+          if ($env:PROCESSOR_ARCHITECTURE -ne 'ARM64') {
+            throw "Windows ARM64 runner did not start a native ARM64 PowerShell process."
+          }
+          Remove-Item "$env:FLUTTER_ROOT\bin\cache\engine-dart-sdk.stamp" -Force
+          & "$env:FLUTTER_ROOT\bin\internal\update_dart_sdk.ps1"
+          $dartVersion = & "$env:FLUTTER_ROOT\bin\dart" --version 2>&1
+          $dartVersion | Write-Host
+          if ($dartVersion -notmatch 'windows_arm64') {
+            throw "Flutter SDK did not switch to a native Windows ARM64 Dart runtime."
+          }
+          flutter precache --windows
+          if (-not (Test-Path "$env:FLUTTER_ROOT\bin\cache\artifacts\engine\windows-arm64-release\flutter_windows.dll")) {
+            throw "Windows ARM64 Flutter engine artifacts were not installed."
+          }
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build windows --release
+      - name: Package Windows build
+        run: |
+          function Get-PeMachine {
+            param([string]$FilePath)
+            $stream = [System.IO.File]::OpenRead($FilePath)
+            try {
+              $reader = [System.IO.BinaryReader]::new($stream)
+              $stream.Position = 0x3C
+              $peHeaderOffset = $reader.ReadInt32()
+              $stream.Position = $peHeaderOffset + 4
+              return $reader.ReadUInt16()
+            } finally {
+              $stream.Dispose()
+            }
+          }
+          $releaseDirectory = "build\windows\${{ matrix.arch }}\runner\Release"
+          if (-not (Test-Path $releaseDirectory)) {
+            throw "Expected Windows release directory was not produced: $releaseDirectory"
+          }
+          $expectedMachine = if ("${{ matrix.arch }}" -eq "arm64") { 0xAA64 } else { 0x8664 }
+          $nativeBinaries = Get-ChildItem -Path $releaseDirectory -File | Where-Object { $_.Extension -in ".exe", ".dll" }
+          if ($nativeBinaries.Count -eq 0) {
+            throw "No Windows executable or DLL files were found in $releaseDirectory"
+          }
+          foreach ($binary in $nativeBinaries) {
+            $machine = Get-PeMachine $binary.FullName
+            if ($machine -ne $expectedMachine) {
+              throw ("{0} has PE machine 0x{1:X4}, expected 0x{2:X4}." -f $binary.Name, $machine, $expectedMachine)
+            }
+          }
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\dist" | Out-Null
+          Compress-Archive -Path "$releaseDirectory\*" -DestinationPath "$env:GITHUB_WORKSPACE\dist\sts-chat-windows-${{ matrix.arch }}.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: dist/sts-chat-windows-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    name: macOS ${{ matrix.arch }} ZIP
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-26-intel
+            excluded_archs: arm64
+            mach_o_arch: x86_64
+          - arch: arm64
+            runner: macos-26
+            excluded_archs: x86_64
+            mach_o_arch: arm64
+    defaults:
+      run:
+        working-directory: src/client
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          architecture: ${{ matrix.arch }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build macos --release
+        env:
+          FLUTTER_XCODE_EXCLUDED_ARCHS: ${{ matrix.excluded_archs }}
+      - name: Thin and verify macOS architecture
+        run: |
+          app_path="build/macos/Build/Products/Release/sts_chat_client.app"
+          expected_arch="${{ matrix.mach_o_arch }}"
+          while IFS= read -r -d '' binary; do
+            binary_archs="$(lipo -archs "$binary" 2>/dev/null || true)"
+            [[ -z "$binary_archs" ]] && continue
+            if [[ " $binary_archs " != *" $expected_arch "* ]]; then
+              echo "Expected $binary to contain $expected_arch, found: $binary_archs"
+              exit 1
+            fi
+            [[ "$binary_archs" == "$expected_arch" ]] && continue
+            temporary_binary="${binary}.thin"
+            rm -f "$temporary_binary"
+            lipo "$binary" -thin "$expected_arch" -output "$temporary_binary"
+            chmod "$(stat -f '%Lp' "$binary")" "$temporary_binary"
+            mv "$temporary_binary" "$binary"
+          done < <(find "$app_path" -type f -print0)
+          codesign --force --deep --sign - "$app_path"
+          codesign --verify --deep --strict "$app_path"
+          while IFS= read -r -d '' binary; do
+            binary_archs="$(lipo -archs "$binary" 2>/dev/null || true)"
+            [[ -z "$binary_archs" ]] && continue
+            if [[ "$binary_archs" != "$expected_arch" ]]; then
+              echo "Expected $binary to contain only $expected_arch, found: $binary_archs"
+              exit 1
+            fi
+          done < <(find "$app_path" -type f -print0)
+      - name: Package macOS app
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/sts_chat_client.app "$GITHUB_WORKSPACE/dist/sts-chat-macos-${{ matrix.arch }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: dist/sts-chat-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, ios, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+      - name: Create checksums
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          release_body=$(cat <<'EOF'
+          Initial public release.
+
+          Included assets:
+          - Android universal debug APK
+          - iOS arm64 unsigned IPA
+          - Windows x64 ZIP
+          - Windows ARM64 ZIP
+          - macOS x64 ZIP
+          - macOS ARM64 ZIP
+          - SHA256SUMS.txt
+
+          The Android APK uses a debug signature. The iOS IPA is unsigned. The
+          Windows application is not code signed. The macOS application is
+          ad-hoc signed and not notarized.
+          EOF
+          )
+          release_id="$(gh api "repos/${GH_REPO}/releases/tags/${TAG_NAME}" --jq .id 2>/dev/null || true)"
+          if [[ -z "$release_id" ]]; then
+            release_id="$(gh api --method POST "repos/${GH_REPO}/releases" \
+              -f tag_name="$TAG_NAME" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="sts-chat $TAG_NAME" \
+              --raw-field body="$release_body" \
+              -F draft=false \
+              -F prerelease=false \
+              --jq .id)"
+          else
+            gh api --method PATCH "repos/${GH_REPO}/releases/${release_id}" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="sts-chat $TAG_NAME" \
+              --raw-field body="$release_body" \
+              -F draft=false \
+              -F prerelease=false >/dev/null
+          fi
+          legacy_asset_id="$(gh api "repos/${GH_REPO}/releases/tags/${TAG_NAME}" --jq '.assets[] | select(.name == "sts-chat-macos.zip") | .id')"
+          if [[ -n "$legacy_asset_id" ]]; then
+            gh api --method DELETE "repos/${GH_REPO}/releases/assets/${legacy_asset_id}" >/dev/null
+          fi
+          gh release upload "$TAG_NAME" release-assets/* --clobber --repo "$GH_REPO"

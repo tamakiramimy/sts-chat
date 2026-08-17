@@ -1,0 +1,34 @@
+# macOS / Apple Silicon development override. Keep the main docker-compose.yml
+# for the RTX 4060 Windows server; start this file with the CPU model profile.
+services:
+  livekit:
+    environment:
+      NODE_IP: ${LIVEKIT_NODE_IP}
+
+  gateway:
+    build:
+      context: ./src/Gateway
+      dockerfile: Dockerfile.macos
+    environment:
+      LiveKit__PublicUrl: ${LIVEKIT_URL:-ws://localhost:7880}
+      Llm__LocalBaseUrl: ${LLM_LOCAL_BASE_URL:-http://llama-cpu:8080/v1}
+
+  voice-agent:
+    environment:
+      LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL:-http://llama-cpu:8080/v1}
+
+  llama-cpu:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    profiles: [cpu-model]
+    command:
+      - -m
+      - /models/Qwen2.5-3B-Instruct-Q4_K_M.gguf
+      - -c
+      - "4096"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    volumes:
+      - ./models:/models:ro
+    restart: unless-stopped

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.stschat.llm</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>exec /opt/homebrew/bin/llama-server -m "$HOME/Library/Application Support/StsChat/models/Qwen2.5-3B-Instruct-Q4_K_M.gguf" --host 127.0.0.1 --port 8081 -c 4096 -ngl 99</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/private/tmp/sts-chat-llm.log</string>
+  <key>StandardErrorPath</key>
+  <string>/private/tmp/sts-chat-llm.log</string>
+</dict>
+</plist>

@@ -1,0 +1,16 @@
+# Local-only LiveKit configuration for Docker Desktop.
+# The advertised addresses and media ports match docker-compose.local.yml so a
+# browser on the same machine can complete WebRTC ICE negotiation.
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+rtc:
+  node_ip: 127.0.0.1
+  tcp_port: 7883
+  port_range_start: 50101
+  port_range_end: 50201
+  use_external_ip: false
+room:
+  auto_create: false
+logging:
+  level: info

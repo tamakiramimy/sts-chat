@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.stschat.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>set -a &amp;&amp; source "$HOME/Library/Application Support/StsChat/.env" &amp;&amp; set +a &amp;&amp; export LIVEKIT_URL=ws://127.0.0.1:7880 &amp;&amp; export LLM_LOCAL_BASE_URL=http://127.0.0.1:8081/v1 &amp;&amp; exec "$HOME/Library/Application Support/StsChat/.venv/bin/python" "$HOME/Library/Application Support/StsChat/voice_agent/agent.py" start</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>/private/tmp/sts-chat-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/private/tmp/sts-chat-agent.log</string>
+</dict>
+</plist>

@@ -1,0 +1,20 @@
+# Local browser development only. Do not use this file for LAN, Tailscale, or
+# internet-facing deployments because LiveKit advertises 127.0.0.1 candidates.
+services:
+  gateway:
+    environment:
+      LiveKit__PublicUrl: ws://localhost:7882
+      CORS_ALLOWED_ORIGINS: http://localhost:3002,http://127.0.0.1:3002
+    ports: !override
+      - "127.0.0.1:8084:8080"
+
+  livekit:
+    command: --config /etc/livekit.local.yaml
+    environment:
+      NODE_IP: 127.0.0.1
+    ports: !override
+      - "127.0.0.1:7882:7880"
+      - "7883:7883"
+      - "50101-50201:50101-50201/udp"
+    volumes: !override
+      - ./deploy/livekit.local.yaml:/etc/livekit.local.yaml:ro

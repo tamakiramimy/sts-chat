@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.stschat.web</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>exec /usr/bin/python3 -m http.server 3000 --bind 127.0.0.1 --directory "$HOME/Library/Application Support/StsChat/web"</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/private/tmp/sts-chat-web.log</string>
+  <key>StandardErrorPath</key>
+  <string>/private/tmp/sts-chat-web.log</string>
+</dict>
+</plist>

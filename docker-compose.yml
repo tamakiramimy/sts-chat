@@ -1,0 +1,91 @@
+name: sts-chat
+
+services:
+  gateway:
+    build:
+      context: ./src/Gateway
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,livekit,voice-agent,llama-cpu}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Gateway: Data Source=/app/data/gateway.db
+      LiveKit__InternalUrl: ${LIVEKIT_INTERNAL_URL:-http://livekit:7880}
+      LiveKit__PublicUrl: ${LIVEKIT_URL}
+      VoiceAgent__HealthUrl: ${VOICE_AGENT_HEALTH_URL:-http://voice-agent:8082/health}
+      Llm__LocalBaseUrl: ${LLM_LOCAL_BASE_URL:-http://llama:8080/v1}
+    ports:
+      - "127.0.0.1:${GATEWAY_HOST_PORT:-8080}:8080"
+    volumes:
+      - gateway-data:/app/data
+    depends_on:
+      livekit:
+        condition: service_started
+    restart: unless-stopped
+
+  voice-agent:
+    build:
+      context: ./src/voice_agent
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      LLM_LOCAL_BASE_URL: ${LLM_LOCAL_BASE_URL:-http://llama:8080/v1}
+      MODEL_HEALTH_URL: ${LLM_LOCAL_BASE_URL:-http://llama:8080/v1}/models
+      VOICE_AGENT_HEALTH_PORT: "8082"
+    depends_on:
+      livekit:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  livekit:
+    image: livekit/livekit-server:v1.8.3
+    command: --config /etc/livekit.yaml
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "127.0.0.1:${LIVEKIT_HOST_PORT:-7880}:7880"
+      - "${LIVEKIT_RTC_TCP_HOST_PORT:-7881}:7881"
+      - "${LIVEKIT_RTC_UDP_HOST_PORT_RANGE:-50000-50100}:50000-50100/udp"
+    volumes:
+      - ./deploy/livekit.yaml:/etc/livekit.yaml:ro
+    restart: unless-stopped
+
+  # Enable only after putting the GGUF file in ./models. The 8GB RTX 4060 is
+  # sized for Qwen2.5 3B Q4; do not keep a larger LLM and GPU TTS resident.
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    profiles: [models]
+    command:
+      - -m
+      - /models/Qwen2.5-3B-Instruct-Q4_K_M.gguf
+      - -ngl
+      - "99"
+      - -c
+      - "4096"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    volumes:
+      - ./models:/models:ro
+    gpus: all
+    restart: unless-stopped
+
+volumes:
+  gateway-data:

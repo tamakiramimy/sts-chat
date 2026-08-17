@@ -1,0 +1,17 @@
+.env
+.DS_Store
+*.iml
+**/bin/
+**/obj/
+.dart_tool/
+.flutter-plugins-dependencies
+.idea/
+.vscode/
+build/
+__pycache__/
+*.pyc
+data/
+models/
+Temp-sts-chat/*
+.venv/*
+.codegraph/*
